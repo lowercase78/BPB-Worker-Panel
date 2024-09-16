@@ -3134,6 +3134,12 @@ function buildXrayVLESSOutbound (tag, address, port, uuid, host, proxyIP) {
 function buildXrayTrojanOutbound (tag, address, port, password, host, proxyIP) {
     return {
         protocol: "trojan",
+		"mux": {
+			"enabled": true,
+			"concurrency": 8,
+			"xudpConcurrency": 8,
+			"xudpProxyUDP443": "reject"
+		},
         settings: {
             servers: [
                 {
