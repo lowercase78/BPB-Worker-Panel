@@ -3234,8 +3234,9 @@ async function buildXrayDNSObject (remoteDNS, localDNS, blockAds, bypassIran, by
     }
 
     if (isWorkerLess) {
-        const resolvedCloudflare = await resolveDNS('cloudflare-dns.com');
-        const resolvedCLDomain = await resolveDNS('cloudflare.com');
+        const resolvedCloudflare = await resolveDNS('cloudflare.com');
+        const resolvedCFNS_1 = await resolveDNS('ns1.cloudflare.com');
+        const resolvedCFNS_2 = await resolveDNS('ns2.cloudflare.com');
         dnsObject.hosts['cloudflare-dns.com'] = [
             ...resolvedDOH.ipv4, 
             ...resolvedCloudflare.ipv4, 
