@@ -1,15 +1,15 @@
 import { Authenticate } from "../authentication/auth";
+import { extractWireguardParams } from "../cores-configs/helpers";
 import { getDataset, updateDataset } from "../kv/handlers";
-import { renderErrorPage } from "../pages/error";
 import { renderHomePage } from "../pages/home";
-import { initializeParams, origin } from "./init";
+import JSZip from "jszip";
 
 export function isValidUUID(uuid) {
-	const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[4][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-	return uuidRegex.test(uuid);
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[4][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    return uuidRegex.test(uuid);
 }
 
-export async function resolveDNS (domain) {
+export async function resolveDNS(domain) {
     const dohURL = 'https://cloudflare-dns.com/dns-query';
     const dohURLv4 = `${dohURL}?name=${encodeURIComponent(domain)}&type=A`;
     const dohURLv6 = `${dohURL}?name=${encodeURIComponent(domain)}&type=AAAA`;
@@ -43,28 +43,32 @@ export function isDomain(address) {
 }
 
 export async function handlePanel(request, env) {
-    await initializeParams(request, env);
-    const auth = await Authenticate(request, env); 
-    if (request.method === 'POST') {     
-        if (!auth) return new Response('Unauthorized or expired session!', { status: 401 });             
-        await updateDataset(request, env); 
+    const auth = await Authenticate(request, env);
+    if (request.method === 'POST') {
+        if (!auth) return new Response('Unauthorized or expired session!', { status: 401 });
+        await updateDataset(request, env);
         return new Response('Success', { status: 200 });
     }
-        
-    const { kvNotFound, proxySettings } = await getDataset(request, env);
-    if (kvNotFound) return await renderErrorPage(request, env, 'KV Dataset is not properly set!', null, true);
-    const pwd = await env.bpb.get('pwd');
-    if (pwd && !auth) return Response.redirect(`${origin}/login`, 302);
+
+    const { proxySettings } = await getDataset(request, env);
+    const pwd = await env.kv.get('pwd');
+    if (pwd && !auth) return Response.redirect(`${globalThis.urlOrigin}/login`, 302);
     const isPassSet = pwd?.length >= 8;
-    return await renderHomePage(request, env, proxySettings, isPassSet);
+    return await renderHomePage(proxySettings, isPassSet);
 }
 
 export async function fallback(request) {
     const url = new URL(request.url);
-    url.hostname = 'www.speedtest.net';
+    url.hostname = globalThis.fallbackDomain;
     url.protocol = 'https:';
-    request = new Request(url, request);
-    return await fetch(request);
+    const newRequest = new Request(url.toString(), {
+        method: request.method,
+        headers: request.headers,
+        body: request.body,
+        redirect: 'manual'
+    });
+
+    return await fetch(newRequest);
 }
 
 export async function getMyIP(request) {
@@ -82,3 +86,56 @@ export async function getMyIP(request) {
         console.error('Error fetching IP address:', error);
     }
 }
+
+export async function getWarpConfigs(request, env, isPro) {
+    const auth = await Authenticate(request, env);
+    if (!auth) return new Response('Unauthorized or expired session!', { status: 401 });
+    const { warpConfigs, proxySettings } = await getDataset(request, env);
+    const { warpEndpoints, amneziaNoiseCount, amneziaNoiseSizeMin, amneziaNoiseSizeMax } = proxySettings;
+    const warpConfig = extractWireguardParams(warpConfigs, false);
+    const { warpIPv6, publicKey, privateKey } = warpConfig;
+    const zip = new JSZip();
+    const trimLines = (string) => string.split("\n").map(line => line.trim()).join("\n");
+    const amneziaNoise = isPro ? trimLines(
+        `Jc = ${amneziaNoiseCount}
+        Jmin = ${amneziaNoiseSizeMin}
+        Jmax = ${amneziaNoiseSizeMax}
+        S1 = 0
+        S2 = 0
+        H1 = 0
+        H2 = 0
+        H3 = 0
+        H4 = 0`
+    ) : '';
+
+    try {
+        warpEndpoints.split(',').forEach((endpoint, index) => {
+            zip.file(`BPB-Warp-${index + 1}.conf`, trimLines(
+                `[Interface]
+                PrivateKey = ${privateKey}
+                Address = 172.16.0.2/32, ${warpIPv6}
+                DNS = 1.1.1.1, 1.0.0.1
+                MTU = 1280
+                ${amneziaNoise}
+                [Peer]
+                PublicKey = ${publicKey}
+                AllowedIPs = 0.0.0.0/0, ::/0
+                Endpoint = ${endpoint}
+                PersistentKeepalive = 25`
+            ));
+        });
+    
+        const zipBlob = await zip.generateAsync({ type: "blob" });
+        const arrayBuffer = await zipBlob.arrayBuffer();
+        return new Response(arrayBuffer, {
+            headers: {
+                "Content-Type": "application/zip",
+                "Content-Disposition": `attachment; filename="BPB-Warp-${isPro ? "Pro-" : ""}configs.zip"`,
+            },
+        });
+    } catch (error) {
+        return new Response("Error generating ZIP file.", { status: 500 });
+    }
+}
+
+

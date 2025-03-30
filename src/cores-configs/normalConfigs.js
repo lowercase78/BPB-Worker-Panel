@@ -1,18 +1,20 @@
-import { getConfigAddresses, generateRemark, randomUpperCase, getRandomPath } from './helpers';
-import { initializeParams, userID, trojanPassword, hostName, client, defaultHttpsPorts } from "../helpers/init";
+import { getConfigAddresses, generateRemark, randomUpperCase, getRandomPath, extractWireguardParams, base64ToDecimal } from './helpers';
 import { getDataset } from '../kv/handlers';
-import { renderErrorPage } from '../pages/error';
 
 export async function getNormalConfigs(request, env) {
-    await initializeParams(request, env);
-    const { kvNotFound, proxySettings } = await getDataset(request, env);
-    if (kvNotFound) return await renderErrorPage(request, env, 'KV Dataset is not properly set!', null, true);
-    const { 
+    const { hostName, defaultHttpsPorts, client, userID, TRPassword } = globalThis;
+    const { proxySettings } = await getDataset(request, env);
+    const {
+        remoteDNS,
         cleanIPs, 
         proxyIP, 
         ports, 
-        vlessConfigs, 
-        trojanConfigs , 
+        VLConfigs, 
+        TRConfigs ,
+        lengthMin,
+        lengthMax,
+        intervalMin,
+        intervalMax, 
         outProxy, 
         customCdnAddrs, 
         customCdnHost, 
@@ -20,13 +22,12 @@ export async function getNormalConfigs(request, env) {
         enableIPv6
     } = proxySettings;
     
-    let vlessConfs = '', trojanConfs = '', chainProxy = '';
+    let VLConfs = '', TRConfs = '', chainProxy = '';
     let proxyIndex = 1;
-    const Addresses = await getConfigAddresses(hostName, cleanIPs, enableIPv6);
+    const Addresses = await getConfigAddresses(cleanIPs, enableIPv6);
     const customCdnAddresses = customCdnAddrs ? customCdnAddrs.split(',') : [];
     const totalAddresses = [...Addresses, ...customCdnAddresses];
-    const alpn = client === 'singbox' ? 'http/1.1' : 'h2,http/1.1';
-    const trojanPass = encodeURIComponent(trojanPassword);
+    const TRPass = encodeURIComponent(TRPassword);
     const earlyData = client === 'singbox' 
         ? '&eh=Sec-WebSocket-Protocol&ed=2560' 
         : encodeURIComponent('?ed=2560');
@@ -38,20 +39,15 @@ export async function getNormalConfigs(request, env) {
             const sni = isCustomAddr ? customCdnSni : randomUpperCase(hostName);
             const host = isCustomAddr ? customCdnHost : hostName;
             const path = `${getRandomPath(16)}${proxyIP ? `/${encodeURIComponent(btoa(proxyIP))}` : ''}${earlyData}`;
-            const vlessRemark = encodeURIComponent(generateRemark(proxyIndex, port, addr, cleanIPs, 'VLESS', configType));
-            const trojanRemark = encodeURIComponent(generateRemark(proxyIndex, port, addr, cleanIPs, 'Trojan', configType));
+            const VLRemark = encodeURIComponent(generateRemark(proxyIndex, port, addr, cleanIPs, atob('VkxFU1M='), configType));
+            const TRRemark = encodeURIComponent(generateRemark(proxyIndex, port, addr, cleanIPs, atob('VHJvamFu'), configType));
             const tlsFields = defaultHttpsPorts.includes(port) 
-                ? `&security=tls&sni=${sni}&fp=randomized&alpn=${alpn}`
+                ? `&security=tls&sni=${sni}&fp=randomized&alpn=http/1.1`
                 : '&security=none';
+            const hiddifyFragment = client === 'hiddify-frag' && defaultHttpsPorts.includes(port) ? `&fragment=${lengthMin}-${lengthMax},${intervalMin}-${intervalMax},hellotls` : '';
 
-            if (vlessConfigs) {
-                vlessConfs += `${atob('dmxlc3M')}://${userID}@${addr}:${port}?path=/${path}&encryption=none&host=${host}&type=ws${tlsFields}#${vlessRemark}\n`; 
-            }
-
-            if (trojanConfigs) {
-                trojanConfs += `${atob('dHJvamFu')}://${trojanPass}@${addr}:${port}?path=/tr${path}&host=${host}&type=ws${tlsFields}#${trojanRemark}\n`;
-            }
-            
+            if (VLConfigs) VLConfs += `${atob('dmxlc3M6Ly8=')}${userID}@${addr}:${port}?path=/${path}&encryption=none&host=${host}&type=ws${tlsFields}${hiddifyFragment}#${VLRemark}\n`; 
+            if (TRConfigs) TRConfs += `${atob('dHJvamFuOi8v')}${TRPass}@${addr}:${port}?path=/tr${path}&host=${host}&type=ws${tlsFields}${hiddifyFragment}#${TRRemark}\n`;
             proxyIndex++;
         });
     });
@@ -70,10 +66,47 @@ export async function getNormalConfigs(request, env) {
         }
     }
 
-    const configs = btoa(vlessConfs + trojanConfs + chainProxy);
+    const configs = btoa(VLConfs + TRConfs + chainProxy);
+    const headers = {
+        'Content-Type': 'text/plain;charset=utf-8',
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        'CDN-Cache-Control': 'no-store'
+    };
+
+    client === 'hiddify-frag' && Object.assign(headers, {
+        'Profile-Title': 'BPB Fragment',
+        'DNS': remoteDNS
+    });
+
     return new Response(configs, { 
         status: 200,
+        headers
+    });
+}
+
+export async function getHiddifyWarpConfigs (request, env, isPro) {
+    const { proxySettings } = await getDataset(request, env);
+    const {
+        warpEndpoints,
+        hiddifyNoiseMode, 
+		noiseCountMin, 
+		noiseCountMax, 
+		noiseSizeMin, 
+		noiseSizeMax, 
+		noiseDelayMin, 
+		noiseDelayMax
+    } = proxySettings;
+
+    let configs = '';
+    warpEndpoints.split(',').forEach( (endpoint, index) => {
+        configs += `warp://${endpoint}${ isPro ? `?ifp=${noiseCountMin}-${noiseCountMax}&ifps=${noiseSizeMin}-${noiseSizeMax}&ifpd=${noiseDelayMin}-${noiseDelayMax}&ifpm=${hiddifyNoiseMode}` : ''}#${encodeURIComponent(`💦 ${index + 1} - Warp 🇮🇷`)}&&detour=warp://162.159.192.1:2408#${encodeURIComponent(`💦 ${index + 1} - WoW 🌍`)}\n`;
+    });
+
+    return new Response(btoa(configs), { 
+        status: 200,
         headers: {
+            'Profile-Title': `BPB Warp${isPro ? ' Pro' : ''}`,
+            'DNS': '1.1.1.1',
             'Content-Type': 'text/plain;charset=utf-8',
             'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
             'CDN-Cache-Control': 'no-store'

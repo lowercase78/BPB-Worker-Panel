@@ -1,10 +1,10 @@
 import { resolveDNS, isDomain } from '../helpers/helpers';
 
-export async function getConfigAddresses(hostName, cleanIPs, enableIPv6) {
-    const resolved = await resolveDNS(hostName);
+export async function getConfigAddresses(cleanIPs, enableIPv6) {
+    const resolved = await resolveDNS(globalThis.hostName);
     const defaultIPv6 = enableIPv6 ? resolved.ipv6.map((ip) => `[${ip}]`) : []
     return [
-        hostName,
+        globalThis.hostName,
         'www.speedtest.net',
         ...resolved.ipv4,
         ...defaultIPv6,
@@ -67,4 +67,11 @@ export function isIPv4(address) {
 export function isIPv6(address) {
     const ipv6Pattern = /^\[(?:(?:[a-fA-F0-9]{1,4}:){7}[a-fA-F0-9]{1,4}|(?:[a-fA-F0-9]{1,4}:){1,7}:|::(?:[a-fA-F0-9]{1,4}:){0,7}|(?:[a-fA-F0-9]{1,4}:){1,6}:[a-fA-F0-9]{1,4}|(?:[a-fA-F0-9]{1,4}:){1,5}(?::[a-fA-F0-9]{1,4}){1,2}|(?:[a-fA-F0-9]{1,4}:){1,4}(?::[a-fA-F0-9]{1,4}){1,3}|(?:[a-fA-F0-9]{1,4}:){1,3}(?::[a-fA-F0-9]{1,4}){1,4}|(?:[a-fA-F0-9]{1,4}:){1,2}(?::[a-fA-F0-9]{1,4}){1,5}|[a-fA-F0-9]{1,4}:(?::[a-fA-F0-9]{1,4}){1,6})\](?:\/(1[0-1][0-9]|12[0-8]|[0-9]?[0-9]))?$/;
     return ipv6Pattern.test(address);
+}
+
+export function getDomain(url) {
+    const newUrl = new URL(url);
+    const host = newUrl.hostname;
+    const isHostDomain = isDomain(host);
+    return {host, isHostDomain};
 }
